@@ -71,7 +71,7 @@ impl Generation{
             .iter()
             .filter_map(|(network, score)|{
 
-                let percent_score = max.div(*score);
+                let percent_score = score.div(max);
 
                 if rand.gen::<f32>() % 1.0 < percent_score * percent_score {
                     Some((network.clone(), *score))
