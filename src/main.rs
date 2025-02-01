@@ -1,13 +1,15 @@
-use std::{env, fs::File, io::Write};
-use network::{ColVector, Network};
+use std::{env, fs::File, io::Write, ops::Div};
+use matrix::ColVector;
+use network::Network;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use snake_game::{Direction, EndFrameState, SnakeGame};
 
 mod snake_game;
 mod network;
+mod matrix;
 
-const FILE_NAME: &str = "generation_attempt_2(12,12,5).json";
+const FILE_NAME: &str = "generation(12,12,4).json";
 const NUM_NETS: usize = 100;
 
 fn main() {
@@ -62,29 +64,37 @@ impl Generation{
     fn new_from_generation(parents: &Generation)->Self{
         let rand = &mut rand::thread_rng();
 
+        let (_, max) = parents.score_range(1.0f32);
+
         let num_parents = parents.networks.len();
         let mut new_networks: Vec<(Network, Score)> = parents.networks
             .iter()
-            .enumerate()
-            .filter_map(|(index, (network, score))|{
-                let percent = index as f32 / num_parents as f32;
-                if rand.gen::<f32>() % 1.0 < 1.0 - percent.powf(2.0) {
+            .filter_map(|(network, score)|{
+
+                let percent_score = max.div(*score);
+
+                if rand.gen::<f32>() % 1.0 < percent_score * percent_score {
                     Some((network.clone(), *score))
                 }else{
                     None
                 }
+
             })
             .collect();
 
         new_networks.push(parents.best_ever_network.clone());
 
+        let num_culled_networks = new_networks.len();
+
         let mut i = 0;
         while new_networks.len() < num_parents {
-            let parent_index = i % new_networks.len();
-            if let Some(parent) = new_networks.get(parent_index) {
+
+            if let Some(parent) = new_networks.get(i % num_culled_networks) {
+
                 let mut new_network = parent.0.clone();
                 new_network.randomly_edit(rand);
                 new_networks.push((new_network, 0.0));
+                
             }else{
                 i = 0;
             }
@@ -144,6 +154,8 @@ impl Generation{
             .map(|(_, score)| *score as f32)
             .sum::<f32>() / num as f32
     }
+    
+    /// (Min, Max)
     fn score_range(&self, top_percent: f32)->(Score, Score){
         let num = (self.networks.len() as f32 * top_percent) as usize;
         self.networks
@@ -190,55 +202,6 @@ impl Generation{
     }
 }
 
-// struct Simulation;
-// impl Simulation{
-//     fn run(
-//         &self,
-//         seed: u64,
-//         get_input: impl Fn(&SnakeGame)->Option<Direction>
-//     )->i32{
-    
-//         let mut game = SnakeGame::new(seed);
-//         let mut num_frames: i32 = 0;
-//         let mut max_length: i32 = 0;
-        
-//         //run game
-//         loop {
-//             if let Some(direction) = get_input(&game) {
-//                 game.accept_input(direction);
-//             }
-            
-//             if game.to_next_frame() == EndFrameState::GameOver {
-//                 break false;
-//             }
-    
-//             num_frames += 1;
-//             max_length = max_length.max(game.length() as i32);
-    
-//             if num_frames > (1000 + (max_length * 30)) {
-//                 break true;
-//             }
-//         };
-    
-//         max_length
-//     }
-//     fn run_for_player(
-//         &self,
-//         seed: u64,
-//         get_input: impl Fn()->Option<Direction>
-//     ){
-//         let mut game = SnakeGame::new(seed);
-//         loop {
-//             game.accept_input(get_input());
-//             if game.to_next_frame() == EndFrameState::GameOver {
-//                 break;
-//             }
-//             game.print_frame();
-//         }
-//     }
-// }
-
-
 fn train_networks(file_name: &str) {
 
     let mut generation = Generation::load(file_name);
@@ -247,10 +210,9 @@ fn train_networks(file_name: &str) {
         generation = Generation::new_from_generation(&generation);
         if generation.generation_counter % 100 == 0 {
             println!(
-                "Generation {}: Best Ever: {}, (Min, Max): {:?}, Avg score: {}",
+                "Generation {}: Best Ever: {}, Avg score: {}",
                 generation.generation_counter,
                 generation.best_ever_network.1,
-                generation.score_range(0.3f32),
                 generation.mean_score(0.3f32),
             );
             generation.save(file_name);
