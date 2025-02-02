@@ -11,6 +11,7 @@ mod matrix;
 
 const FILE_NAME: &str = "generation(12,12,4).json";
 const NUM_NETS: usize = 100;
+const NUM_THREADS: u8 = 6;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -114,7 +115,7 @@ impl Generation{
         out
     }
     fn train_scores(&mut self){
-        self.networks = train_scores_on_multiple_threads(self.networks.drain(..).collect(), 6);
+        self.networks = train_scores_on_multiple_threads(self.networks.drain(..).collect(), NUM_THREADS);
         
         self.networks.sort_by(|a, b|
             b.1.partial_cmp(&a.1).unwrap()
@@ -202,19 +203,25 @@ impl Generation{
 
 
 fn train_scores_on_multiple_threads(mut networks: Vec<(Network, Score)>, num_threads: u8)->Vec<(Network, Score)>{
-    for i in 0..num_threads {
-        let start_index = (networks.len() / num_threads as usize) * (num_threads - i) as usize;
 
-        let split_vec: Vec<(Network, f32)> = networks.split_off(start_index);
+    let chunk_size = (networks.len() + num_threads as usize - 1) / num_threads as usize; // Round up
+    let mut handles = Vec::new();
 
-        let join_handle = std::thread::spawn(move || {
-            return train_scores_single_thread(split_vec);
-        });
+    let chunks: Vec<Vec<(Network, Score)>> = networks
+        .chunks_mut(chunk_size)
+        .map(|chunk| chunk.to_vec()) // Avoids split_off overhead
+        .collect();
 
-        networks.append(&mut join_handle.join().unwrap());
+    for chunk in chunks {
+        handles.push(std::thread::spawn(move || train_scores_single_thread(chunk)));
     }
-    
-    networks
+
+    let mut results = Vec::new();
+    for handle in handles {
+        results.append(&mut handle.join().unwrap()); // Collect results
+    }
+
+    results
 }
 fn train_scores_single_thread(mut networks: Vec<(Network, Score)>)->Vec<(Network, Score)>{
     for (network, score) in networks.iter_mut(){
@@ -232,7 +239,7 @@ fn train_networks(file_name: &str) {
 
     loop {
         generation = Generation::new_from_generation(&generation);
-        if generation.generation_counter % 100 == 0 {
+        if generation.generation_counter % 10 == 0 {
             println!(
                 "Generation {}: Best Ever: {}, Avg score: {}",
                 generation.generation_counter,
